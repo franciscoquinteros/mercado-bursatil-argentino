@@ -1,5 +1,6 @@
 # server.py
 
+import os
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 from datetime import datetime
@@ -33,3 +34,7 @@ def obtener_activo(simbolo: str = Query(..., description="Símbolo del activo"))
 def obtener_ultima(simbolo: str = Query(..., description="Símbolo del activo")):
     cotizacion = cliente.obtener_ultima_cotizacion(simbolo)
     return cotizacion.to_dict() if cotizacion else {"error": "Cotización no disponible"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
