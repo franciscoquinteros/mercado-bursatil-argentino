@@ -1,0 +1,164 @@
+# chatmcp.yaml - Definición de tu Servidor MCP para MCP.so
+
+# Información básica sobre tu servidor
+name: mercadoArgentinoAPI # Nombre clave único para tu servidor MCP
+description: |
+  Provee acceso a datos en tiempo real e histórico del mercado bursátil argentino
+  usando datos de Yahoo Finance a través de una API REST. Permite obtener cotizaciones,
+  información de activos y datos históricos para símbolos como GGAL.BA, YPFD.BA, ^MERV, etc.
+  Implementado con FastAPI y yfinance.
+
+# Configuración para ejecutar este servidor usando Docker (para hosting en MCP.so)
+docker:
+  # El nombre de la imagen de Docker que MCP.so debe usar.
+  # Esta imagen debe estar disponible en un registro público (como Docker Hub).
+  # *** ¡¡¡ IMPORTANTE: REEMPLAZA ESTO CON LA RUTA REAL A TU IMAGEN DOCKER !!! ***
+  # Ejemplo: si tu usuario de Docker Hub es 'miusuario' y nombraste la imagen 'mcp-mercado-ar', sería 'miusuario/mcp-mercado-ar:latest'
+  image: tu_usuario_docker/mcp-mercado-argentino:latest # <-- ¡¡¡ DEBES CAMBIAR ESTO !!!
+
+  # Puertos que el contenedor Docker expone.
+  # Mapea el puerto interno del contenedor (donde Uvicorn escucha) al puerto que MCP.so gestionará.
+  # El puerto 80 dentro del contenedor coincide con el EXPOSE 80 en el Dockerfile y el --port 80 en el CMD.
+  ports:
+    - 80 # El puerto interno del contenedor
+
+# Definición de las herramientas (endpoints de API) que ofrece tu servidor MCP.
+# Esto le indica al orquestador MCP (y a la IA) cómo interactuar con tu servicio.
+tools:
+  # Definición de la herramienta para obtener datos históricos (/historico)
+  - name: obtener_historico # Nombre de la función que la IA "llamará"
+    description: Obtiene datos históricos de cotizaciones (apertura, cierre, máximo, mínimo, volumen) para un símbolo de activo en un rango de fechas e intervalo especificados.
+    type: function # Indica que es una función (generalmente a través de una llamada API)
+    # Esquema de entrada: Describe los parámetros que necesita la función (basado en tu SolicitudHistorico)
+    input_schema:
+      type: object
+      properties:
+        simbolo:
+          type: string
+          description: Símbolo del activo financiero (ej. GGAL, YPFD, ^MERV - Merval).
+        desde:
+          type: string
+          format: date-time # Especifica el formato de fecha y hora esperado (ISO 8601)
+          description: Fecha de inicio inclusiva para los datos históricos (formato ISO 8601, ej. '2023-01-01T00:00:00Z'). Opcional, por defecto el último año.
+          nullable: true # Indica que el parámetro es opcional
+        hasta:
+          type: string
+          format: date-time
+          description: Fecha de fin inclusiva para los datos históricos (formato ISO 8601). Opcional, por defecto la fecha y hora actuales.
+          nullable: true
+        intervalo:
+          type: string
+          enum: ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"] # Enumera los valores válidos de Intervalo
+          description: Intervalo de tiempo entre los puntos de datos. Por defecto '1d' (diario).
+          default: "1d"
+        ajustado:
+          type: boolean
+          description: Si se deben usar precios ajustados por splits y dividendos. Por defecto true.
+          default: true
+      required:
+        - simbolo # 'simbolo' es el único parámetro requerido por tu API para esta función
+
+    # Esquema de salida: Describe la estructura de la respuesta exitosa (basado en tu RespuestaHistorico con estado OK)
+    # Esto ayuda a la IA a entender qué información recibe.
+    output_schema:
+      type: object
+      properties:
+        estado:
+          type: string
+          enum: ["OK"] # Especificamos solo OK para la respuesta exitosa
+          description: Siempre "OK" si la llamada fue exitosa y devolvió datos.
+        datos:
+          type: array
+          description: Lista de objetos de cotización histórica.
+          items: # Describe la estructura de cada objeto en la lista (basado en tu Cotizacion)
+            type: object
+            properties:
+              simbolo: {type: string, description: "Símbolo del activo."}
+              timestamp: {type: string, format: date-time, description: "Marca de tiempo de la cotización (ISO 8601)."}
+              apertura: {type: number, description: "Precio de apertura."}
+              maximo: {type: number, description: "Precio máximo."}
+              minimo: {type: number, description: "Precio mínimo."}
+              cierre: {type: number, description: "Precio de cierre."}
+              volumenNominal: {type: number, description: "Volumen negociado."}
+              volumenMonto: {type: number, description: "Monto negociado (opcional/estimado).", nullable: true} # Añadir nullable si puede ser None
+              cantidadOperaciones: {type: number, description: "Cantidad de operaciones (opcional/estimado).", nullable: true}
+              ajustado: {type: boolean, description: "Indica si los precios están ajustados."}
+          minItems: 1 # Esperamos al menos un registro si el estado es OK
+        metadata:
+          type: object # Descripción básica, podrías detallarla más si es relevante para la IA
+          description: Metadatos sobre los datos obtenidos (rango de fechas real, # registros).
+        # No incluimos 'mensaje' o 'codigo' aquí porque este schema es para el caso OK.
+        # La gestión de errores es probable que se maneje fuera de este schema de output exitoso.
+      required:
+        - estado
+        - datos # 'datos' y 'metadata' son requeridos si el estado es OK
+        - metadata
+
+  # Definición de la herramienta para obtener información de un activo (/activo)
+  - name: obtener_info_activo
+    description: Obtiene información general sobre un activo financiero específico (nombre, tipo, mercado, moneda).
+    type: function
+    input_schema:
+      type: object
+      properties:
+        simbolo:
+          type: string
+          description: Símbolo del activo financiero (ej. GGAL).
+      required:
+        - simbolo
+
+    # Esquema de salida exitosa (basado en tu ActivoFinanciero)
+    output_schema:
+      type: object
+      properties:
+        simbolo: {type: string, description: "Símbolo del activo."}
+        tipo: {type: string, enum: ["ACCION", "CEDEAR", "BONO", "ETF", "OPCION", "FUTURO"], description: "Tipo de activo."}
+        denominacion: {type: string, description: "Nombre o denominación completa del activo."}
+        panel: {type: string, enum: ["LIDER", "GENERAL", "PYMES", "BONOS", "LETRAS"], description: "Panel de cotización.", nullable: true}
+        mercado: {type: string, enum: ["BYMA", "MAE", "MAV", "ROFEX", "NYSE", "NASDAQ"], description: "Mercado de cotización principal."}
+        moneda: {type: string, enum: ["ARS", "USD", "USD-LINKED", "EUR"], description: "Moneda de cotización."}
+        codigoISIN: {type: string, description: "Código ISIN (opcional).", nullable: true}
+        codigoCFI: {type: string, description: "Código CFI (opcional).", nullable: true}
+        simboloYahoo: {type: string, description: "Símbolo utilizado en Yahoo Finance.", nullable: true}
+      required:
+        - simbolo # Al menos el símbolo y la denominación deberían estar presentes en una respuesta exitosa
+        - denominacion # Aunque tu API podría devolver error, este schema describe el caso exitoso
+
+  # Definición de la herramienta para obtener la última cotización (/ultima)
+  - name: obtener_ultima_cotizacion
+    description: Obtiene la cotización más reciente disponible para un símbolo de activo.
+    type: function
+    input_schema:
+      type: object
+      properties:
+        simbolo:
+          type: string
+          description: Símbolo del activo financiero (ej. ^MERV, GGAL).
+      required:
+        - simbolo
+
+    # Esquema de salida exitosa (basado en tu Cotizacion)
+    output_schema:
+      type: object
+      properties:
+        simbolo: {type: string, description: "Símbolo del activo."}
+        timestamp: {type: string, format: date-time, description: "Marca de tiempo de la cotización (ISO 8601)."}
+        apertura: {type: number, description: "Precio de apertura."}
+        maximo: {type: number, description: "Precio máximo."}
+        minimo: {type: number, description: "Precio mínimo."}
+        cierre: {type: number, description: "Precio de cierre."}
+        volumenNominal: {type: number, description: "Volumen negociado."}
+        volumenMonto: {type: number, description: "Monto negociado (opcional/estimado).", nullable: true}
+        cantidadOperaciones: {type: number, description: "Cantidad de operaciones (opcional/estimado).", nullable: true}
+        ajustado: {type: boolean, description: "Indica si los precios están ajustados."}
+      required:
+         - simbolo # Todos los campos son requeridos si se devuelve una cotización
+         - timestamp
+         - apertura
+         - maximo
+         - minimo
+         - cierre
+         - volumenNominal
+
+# Puedes añadir otras secciones si la documentación completa de chatmcp.yaml las requiere
+# Por ejemplo, si necesitas especificar cómo manejar la autenticación o parámetros globales.
