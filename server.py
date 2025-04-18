@@ -35,6 +35,10 @@ def obtener_ultima(simbolo: str = Query(..., description="Símbolo del activo"))
     cotizacion = cliente.obtener_ultima_cotizacion(simbolo)
     return cotizacion.to_dict() if cotizacion else {"error": "Cotización no disponible"}
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
